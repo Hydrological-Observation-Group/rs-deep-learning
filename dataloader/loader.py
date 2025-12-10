@@ -2,10 +2,9 @@
 ## create: 2021.9.15
 ## des: data loading throuth 3 ways. 1) through scene pathes, 2) through torch.Tensor, 3) through patch pathes.
 
-
-from utils.geotif_io import readTiff
 import torch
 import numpy as np
+from utils.geotif_io import readTiff
 from dataloader.preprocess import crop_scales
 
 class scene_path_dset(torch.utils.data.Dataset):
@@ -81,6 +80,7 @@ class patch_tensor_dset(torch.utils.data.Dataset):
     '''
     def __init__(self, patch_pair_list):
         self.patch_pair_list = patch_pair_list
+        # 初始化数据集，存储图像块和对应标签的列表。
     def __getitem__(self, index):
         '''load patches and truths'''
         patch = self.patch_pair_list[index][0]

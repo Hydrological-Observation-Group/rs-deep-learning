@@ -3,7 +3,7 @@ data/s1-dset/
 data/s2-dset/
 
 ## the trained model
-model_trained/*.pth
+model/trained/*
 
 ## the other
 .venv

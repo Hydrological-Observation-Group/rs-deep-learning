@@ -3,11 +3,10 @@
 ## des: deeplabv3plus model (with Xception65 backbone).
 
 
-import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from model_backbone.xception65 import Xception65
+from model.backbone.xception65 import Xception65
 
 
 def conv1x1_bn_relu(in_channels, out_channels):
@@ -47,7 +46,7 @@ class aspp_pooling(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(aspp_pooling, self).__init__()
         self.layers = nn.Sequential(
-                nn.AdaptiveAvgPool2d(1),     ## size -> 1x1
+                nn.AdaptiveAvgPool2d((1)),     ## size -> 1x1
                 nn.Conv2d(in_channels, out_channels, 1, bias=False),
                 nn.BatchNorm2d(out_channels),
                 nn.ReLU()
@@ -83,12 +82,23 @@ class aspp(nn.Module):
                     nn.BatchNorm2d(self.out_channels),
                     nn.ReLU(),
                     nn.Dropout(0.5))
+    # def forward(self, x):
+    #     res = []
+    #     for conv in self.convs:
+    #         res.append(conv(x))
+    #     res = torch.cat(res, dim=1)
+    #     return self.project(res)
     def forward(self, x):
         res = []
-        for conv in self.convs:
-            res.append(conv(x))
+        for i, conv in enumerate(self.convs):
+            out = conv(x)
+            res.append(out)
+        
         res = torch.cat(res, dim=1)
-        return self.project(res)
+        
+        res = self.project(res)
+        
+        return res
 
 class Xception65_feat(nn.Module):
     '''original encoder for deeplabv3_plus moel

@@ -1,7 +1,12 @@
+'''
+author: xin luo
+create: 2024.5.20;  
+des: backbone model of deeplabv3+ with xception65
+'''
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchsummary import summary
 
 class SeparableConv2d(nn.Module):
     ''' dilated_dw_conv2d -> bn(optional) -> 1x1 conv'''

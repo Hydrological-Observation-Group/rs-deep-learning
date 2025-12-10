@@ -7,7 +7,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from model_backbone.mobilenet import MobileNetV2
+from model.backbone.mobilenet import MobileNetV2
 
 def conv1x1_bn_relu(in_channels, out_channels):
     return nn.Sequential(
@@ -107,7 +107,9 @@ class Mobilev2_feat(nn.Module):
         return fea_low, fea_mid, fea_high
         
 class deeplabv3plus_mobilev2(nn.Module): 
-    def __init__(self, num_bands, num_classes, channels_fea=[16, 24, 64]):
+    def __init__(self, num_bands, 
+                 num_classes=2, 
+                 channels_fea=[16, 24, 64]):
         ''' 
         Improvement: 1. use mobilenetv2 as backbone model; 
                      2. use multiple level features (more a mid-level feature than deeplabv3plus).

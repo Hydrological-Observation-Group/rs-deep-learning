@@ -11,20 +11,38 @@ from queue import Queue
 
 class normalize:
     '''normalization with the given per-band max and min values'''
+    
     def __init__(self, max_bands, min_bands):
         '''max, min: list, values corresponding to each band'''
-        self.max, self.min = max_bands, min_bands      
+        self.max, self.min = max_bands, min_bands
+        # 初始化时接收每个波段的最大值和最小值，并存储在实例变量中。
+
     def __call__(self, image):
         image_nor = []
-        if isinstance(self.max,int):            
+        # 初始化一个空列表，用于存储归一化后的波段数据。
+
+        if isinstance(self.max, int):
+            # 如果最大值是一个整数（而不是列表），则为每个波段创建相同的最大值和最小值列表。
             self.max = [self.max for i in range(image.shape[-1])]
-            self.min = [self.min for i in range(image.shape[-1])]        
+            self.min = [self.min for i in range(image.shape[-1])]
+
         for band in range(image.shape[-1]):
-            band_nor = (image[:,:,band]-self.min[band])/(self.max[band]-self.min[band]+0.0001)
+            # 遍历图像的每个波段。
+            band_nor = (image[:, :, band] - self.min[band]) / (self.max[band] - self.min[band] + 0.0001)
+            # 对每个波段进行归一化处理，使用给定的最大值和最小值。
+            # 加上一个小的常数（0.0001）以避免除以零。
+
             image_nor.append(band_nor)
+            # 将归一化后的波段数据添加到列表中。
+
         image_nor = np.array(image_nor)
-        image_nor = np.clip(image_nor, 0., 1.) 
+        # 将列表转换为 numpy 数组。
+
+        image_nor = np.clip(image_nor, 0., 1.)
+        # 将归一化后的数据裁剪到 [0, 1] 范围内，确保所有值都在此范围内。
+
         return image_nor
+        # 返回归一化后的图像数据。
 
 def read_normalize(paths_img, paths_truth, max_bands, min_bands):
     ''' des: data (s1 ascending, s1 descending and truth) reading 
@@ -36,15 +54,28 @@ def read_normalize(paths_img, paths_truth, max_bands, min_bands):
             scenes list and truths list
     '''
     scene_list, truth_list = [],[]
+    # 初始化场景列表和真值列表，用于存储处理后的图像和标签数据。
+
     for i in range(len(paths_img)):
         ## --- data reading
         scene, _ = readTiff(paths_img[i])
+        # 读取路径为 paths_img[i] 的图像数据，返回图像数组。
+
         truth, _ = readTiff(paths_truth[i])
+        # 读取路径为 paths_truth[i] 的标签数据，返回标签数组。
+
         ## --- data normalization 
         scene = normalize(max_bands=max_bands, min_bands=min_bands)(scene)
-        scene[np.isnan(scene)]=0         # remove nan value
+        # 对图像数据进行归一化处理，将其缩放到指定的最大和最小波段值范围内。
+
+        scene[np.isnan(scene)] = 0
+        # 将图像数据中的 NaN 值替换为 0，以去除无效值。
+
         scene_list.append(scene), truth_list.append(truth)
+        # 将处理后的图像和标签数据分别添加到场景列表和真值列表中。
+
     return scene_list, truth_list
+    # 返回包含所有处理后图像和标签数据的列表。
 
 # def crop(image, truth, size=[256]):
 #     ''' numpy-based
@@ -59,19 +90,32 @@ def read_normalize(paths_img, paths_truth, max_bands, min_bands):
 #     return patch, ptruth
 
 class crop:
-    ''' numpy-based
-        des: randomly crop corresponding to specific size
-        input image and truth are np.array
-        input size: (size of the height and width, the height and width are the same)
+    ''' 
+    numpy-based
+    des: randomly crop corresponding to specific size
+    input image and truth are np.array
+    input size: (size of the height and width, the height and width are the same)
     '''
+    
     def __init__(self, patch_size=[256]):
         self.patch_size = patch_size[0]
+        # 初始化裁剪类，设置裁剪块的大小。
+
     def __call__(self, image, truth):
         start_h = random.randint(0, truth.shape[0] - self.patch_size)
+        # 随机选择裁剪块的起始高度，确保不超出图像边界。
+
         start_w = random.randint(0, truth.shape[1] - self.patch_size)
+        # 随机选择裁剪块的起始宽度，确保不超出图像边界。
+
         patch = image[:, start_h:start_h+self.patch_size, start_w:start_w + self.patch_size]
+        # 从输入图像中裁剪出指定大小的图像块。
+
         ptruth = truth[start_h:start_h+self.patch_size, start_w:start_w + self.patch_size]
+        # 从输入标签中裁剪出对应的标签块。
+
         return patch, ptruth
+        # 返回裁剪后的图像块和标签块。
 
 class crop_scales:
     ''' numpy-based

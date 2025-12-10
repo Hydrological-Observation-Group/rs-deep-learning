@@ -1,33 +1,24 @@
 ## author: xin luo
-## creat: 2022.4.3, modify: 2023.2.3
+## creat: 2022.4.3, modify: 2025.12.10
 ## des: model traing with the dset(traset or full dset)
 ## usage: python trainer.py 
-## note: the user should set configure parameters in the scripts/config.py file.
+## note: the user should set configure parameters in the scripts/config_tra.py file.
 
-import sys
-import warnings
-warnings.filterwarnings("ignore")
-import numpy as np
 import torch
-import torch.nn as nn
 import pandas as pd
 import time
 from glob import glob
-from scripts import config
-from dataloader.preprocess import read_normalize
-from utils.metric import oa_binary, miou_binary
-from model_seg.unet import unet
-from model_seg.hrnet import hrnet
-from model_seg.deeplabv3plus import deeplabv3plus
-from model_seg.surface_water.watnet import watnet
-from model_seg.surface_water.gmnet import gmnet
-from model_seg.deeplabv3plus_mobilev2 import deeplabv3plus_mobilev2
-from dataloader.parallel_loader import threads_scene_dset
-from dataloader.loader import patch_tensor_dset, scene_tensor_dset
+from scripts import config_tra
+from model.seg.unet import unet
+from utils.utils import read_scenes
+from utils.metrics import oa_binary, miou_binary
+from model.seg.deeplabv3plus import deeplabv3plus
+from model.seg.surface_water.watnet import watnet
+from model.seg.deeplabv3plus_mobilev2 import deeplabv3plus_mobilev2
+from utils.dataloader import SceneArraySet, PatchSet
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 torch.manual_seed(999)   # make the training replicable
-
 
 '''------train step------'''
 def train_step(model, loss_fn, optimizer, x, y):
@@ -45,7 +36,7 @@ def train_step(model, loss_fn, optimizer, x, y):
 def val_step(model, loss_fn, x, y):
     model.eval()    ### evaluation mode
     with torch.no_grad():
-        pred = model(x)
+        pred = model(x.float())
         loss = loss_fn(pred, y.float())
     miou = miou_binary(pred=pred, truth=y)
     oa = oa_binary(pred=pred, truth=y)
@@ -66,7 +57,7 @@ def train_loops(model, loss_fn, optimizer, tra_loader, val_loader, epoches, lr_s
 
         '''----- 1. train the model -----'''
         for x_batch, y_batch in tra_loader:
-            if isinstance(x_batch, list):   ## multiscale input
+            if isinstance(x_batch, list):   ### multiscale input
                 x_batch, y_batch = [batch.to(device) for batch in x_batch], y_batch.to(device)
             else: 
                 x_batch, y_batch = x_batch.to(device), y_batch.to(device)
@@ -106,73 +97,62 @@ def train_loops(model, loss_fn, optimizer, tra_loader, val_loader, epoches, lr_s
 
 if __name__ == '__main__':
     ### 1. model instantiation
-    if config.model_name == 'unet':
-      model = unet(num_bands=config.num_bands, num_classes=2).to(device)
-    elif config.model_name == 'deeplabv3plus':
-      model = deeplabv3plus(num_bands=config.num_bands, num_classes=2).to(device)
-    elif config.model_name == 'deeplabv3plus_mobilev2':
-      model = deeplabv3plus_mobilev2(num_bands=config.num_bands, num_classes=2).to(device) 
-    elif config.model_name == 'watnet':
-      model = watnet(num_bands=config.num_bands, num_classes=2).to(device) 
-    elif config.model_name == 'hrnet':
-      model = hrnet(num_bands=config.num_bands, num_classes=2).to(device)         
-    elif config.model_name == 'gmnet':
-      model = gmnet(num_bands=config.num_bands, num_classes=2, 
-                    scale_high=config.patch_size[0], scale_mid=config.patch_size[1], scale_low=config.patch_size[2]).to(device)
-    print('Model name:', config.model_name)
+    if config_tra.model_name == 'unet':
+      model = unet(num_bands=config_tra.num_bands, num_classes=2).to(device)
+    elif config_tra.model_name == 'deeplabv3plus':
+      model = deeplabv3plus(num_bands=config_tra.num_bands, num_classes=2).to(device)
+    elif config_tra.model_name == 'deeplabv3plus_mobilev2':
+      model = deeplabv3plus_mobilev2(num_bands=config_tra.num_bands, num_classes=2).to(device) 
+    elif config_tra.model_name == 'watnet':
+      model = watnet(num_bands=config_tra.num_bands, num_classes=2).to(device) 
+    print('Model name:', config_tra.model_name)
 
     ## Data paths 
     ### Training part of the dataset.
-    paths_scene_tra, paths_truth_tra = config.paths_scene_tra, config.paths_truth_tra
+    paths_scene_tra, paths_truth_tra = config_tra.paths_scene_tra, config_tra.paths_truth_tra
     ### Validation part of the dataset (patch format)
-    paths_patch_val = sorted(glob(config.dir_val_patch+'/*'))   ## validatation patches
+    paths_patch_valset = sorted(glob(config_tra.dir_valset+'/*'))   ## validatation patches
 
     '''--------- 1. Data loading --------'''
     '''----- 1.1 training data loading (from scenes path) '''
-    tra_scenes, tra_truths = read_normalize(paths_img = paths_scene_tra, \
-                                paths_truth = paths_truth_tra, max_bands = config.max_img, min_bands = config.min_img)
-
-    ''' ----- 1.2. Training data loading and auto augmentation'''
-    tra_dset = threads_scene_dset(scene_list = tra_scenes, \
-                                  truth_list = tra_truths, 
-                                  transforms=config.transforms_tra, 
-                                  patch_size=config.patch_size,
-                                  num_thread=config.num_thread_data_load)           ####  num_thread(30) patches per scene.
-
+    scenes_arr, truths_arr = read_scenes(paths_scene_tra, paths_truth_tra)  ## read in memory
+    tra_dset = SceneArraySet(scenes_arr=scenes_arr, 
+                                truths_arr=truths_arr, 
+                                path_size=(256, 256))
     print('size of training data:  ', tra_dset.__len__())
-
-    ''' ----- 1.3. validation data loading (validation patches) ------ '''
-    patch_list_val = [torch.load(path) for path in paths_patch_val]
-
-    val_dset = patch_tensor_dset(patch_pair_list = patch_list_val)
+    ''' ----- 1.2. validation data loading (validation patches) ------ '''
+    val_dset = PatchSet(paths_valset=paths_patch_valset)
     print('size of validation data:', val_dset.__len__())
-
-    tra_loader = torch.utils.data.DataLoader(tra_dset, batch_size=config.batch_size_tra, shuffle=True)
-    val_loader = torch.utils.data.DataLoader(val_dset, batch_size=config.batch_size_val)
+    tra_loader = torch.utils.data.DataLoader(tra_dset, 
+                                             batch_size=config_tra.batch_size_tra, 
+                                             num_workers=10,
+                                             shuffle=True)
+    val_loader = torch.utils.data.DataLoader(val_dset, 
+                                             batch_size=config_tra.batch_size_val)
 
     ''' -------- 2. Model loading and training strategy ------- '''
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config_tra.lr)
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, \
                                                   mode='min', factor=0.6, patience=20)
     # lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.6)
 
     ''' -------- 3. Model training for loops ------- '''
     metrics = train_loops(model=model,  
-                        loss_fn=config.loss_bce, 
+                        loss_fn=config_tra.loss_bce, 
                         optimizer=optimizer,  
                         tra_loader=tra_loader,  
                         val_loader=val_loader,  
-                        epoches=config.num_epoch,  
+                        epoches=config_tra.num_epoch,  
                         lr_scheduler=lr_scheduler,
                         )
 
     ''' -------- 4. trained model and accuracy metric saving  ------- '''
     ## model saving
 
-    torch.save(model.state_dict(), config.path_weights_save)
-    print('Model weights are saved to --> ', config.path_weights_save)
+    torch.save(model.state_dict(), config_tra.path_weights_save)
+    print('Model weights are saved to --> ', config_tra.path_weights_save)
     ## metrics saving
     metrics_df = pd.DataFrame(metrics)
-    metrics_df.to_csv(config.path_metrics_save, index=False, sep=',')
-    print('Training metrics are saved to --> ', config.path_metrics_save)
+    metrics_df.to_csv(config_tra.path_metrics_save, index=False, sep=',')
+    print('Training metrics are saved to --> ', config_tra.path_metrics_save)
 

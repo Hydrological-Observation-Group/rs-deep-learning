@@ -8,8 +8,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import model_seg.deeplabv3plus as deeplabv3plus
-import model_backbone.mobilenet as mobilenet
+from model.seg.deeplabv3plus import aspp
+import model.backbone.mobilenet as mobilenet
 
 def conv1x1_bn_relu(in_channels, out_channels):
     return nn.Sequential(
@@ -66,7 +66,7 @@ class watnet(nn.Module):
         self.atrous_rates = aspp_atrous_rates
         # get multiscale features. 
         self.backbone = mobilenet_feat(self.in_channels)
-        self.aspp = deeplabv3plus.aspp(in_channels=self.channels_feas_mobilenet[2], atrous_rates=self.atrous_rates)
+        self.aspp = aspp(in_channels=self.channels_feas_mobilenet[2], atrous_rates=self.atrous_rates)
     
         self.mid_layer = conv1x1_bn_relu(self.channels_feas_mobilenet[1], 48)
         self.high_mid_layer = nn.Sequential(

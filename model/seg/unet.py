@@ -7,7 +7,6 @@ import torch
 import random
 import torch.nn as nn
 import torch.nn.functional as F
-from torchsummary import summary
 
 def conv1x1_bn_relu(in_channels, out_channels):
     return nn.Sequential(
