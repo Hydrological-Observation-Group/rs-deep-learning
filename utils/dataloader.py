@@ -53,30 +53,28 @@ class ScenePathSet(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.paths_scene)
 
-### - Dataset definition
-class SceneArraySet(torch.utils.data.Dataset):
-    def __init__(self, scenes_arr, truths_arr, path_size=(512, 512)):
-        '''
-        des: build dataset using pre-loaded arrays
-        args:
-            scenes_arr: list of np.arrays, each array is (H, W, C) 
-            truths_arr: list of np.arrays, each array is (H, W)
-            path_size: tuple, (height, width) of cropped patch
-        '''
-        self.scenes_arr = scenes_arr
-        self.truths_arr = truths_arr
-        self.path_size = path_size
-    def __getitem__(self, idx):
-        scene_arr = self.scenes_arr[idx].astype(np.float32).transpose((2, 0, 1)) # (C, H, W)
-        truth_arr = self.truths_arr[idx]
-        patch, truth = RandomCrop(size=self.path_size)(scene_arr, truth_arr)  # crop
-        truth = truth[np.newaxis, :].astype(np.int8)  # (C, H, W)
-        patch = torch.from_numpy(patch).float()
-        truth = torch.from_numpy(truth).float()
-        return patch, truth
-    def __len__(self):
-        return len(self.scenes_arr)
 
+class SceneArraySet(torch.utils.data.Dataset):
+    '''
+    des: scene and truth image reading from the np.array(): read data from memory.
+    '''
+    def __init__(self, scene_truth_list, transforms=None):
+        '''input arrs_scene, arrs_truth are list'''
+        self.scene_truth_list = scene_truth_list
+        self.transforms = transforms
+    def __getitem__(self, index):
+        '''load images and truths'''
+        scene_truth = self.scene_truth_list[index]
+        '''pre-processing (e.g., random crop)'''
+        ### Image augmentation
+        if self.transforms is not None:
+            scene_truth = self.transforms(scene_truth)
+        patches, ptruth = scene_truth[0:-1], scene_truth[-1:]
+        return patches, ptruth
+    def __len__(self):
+        return len(self.scene_truth_list) 
+
+    
 ### - Dataset definition
 class PatchSet(torch.utils.data.Dataset):
     def __init__(self, paths_valset):

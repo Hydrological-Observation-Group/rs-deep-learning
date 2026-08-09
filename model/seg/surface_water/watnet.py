@@ -1,15 +1,160 @@
 ## author: Dual-Star
 ## create: 2024.3.30;  
-## modify by xin luo: 2024.5.20
+## modify by xin luo: 2026.8.9
 ## des: pytorch version watnet, 
 ## note: the watnet is very similar to the deeplabv3plus_mobilev2 in model_seg/deeplabv3plus_mobilev2.py; 
 ##       and the deeplabv3plus_mobilev2 have more parameters. 
 
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from model.seg.deeplabv3plus import aspp
-import model.backbone.mobilenet as mobilenet
+
+def conv1x1_bn_relu6(in_channels, out_channels):
+    return nn.Sequential(
+        nn.Conv2d(in_channels, out_channels, 1, 1, 0, bias=False),
+        nn.BatchNorm2d(out_channels),
+        nn.ReLU6(inplace=True)
+    )
+
+def conv3x3_bn_relu6(in_channels, out_channels, stride):
+    return nn.Sequential(
+        nn.Conv2d(in_channels, out_channels, 3, stride, 1, bias=False),
+        nn.BatchNorm2d(out_channels),
+        nn.ReLU6(inplace=True)
+    )
+
+def make_divisible(value, divisible_by=8):
+    return int(math.ceil(value / divisible_by) * divisible_by)
+
+class InvertedResidual(nn.Module):
+    def __init__(self, in_channels, out_channels, stride, expand_ratio):
+        super().__init__()
+        assert stride in (1, 2)
+        hidden_channels = int(in_channels * expand_ratio)
+        self.use_res_connect = stride == 1 and in_channels == out_channels
+
+        if expand_ratio == 1:
+            self.conv = nn.Sequential(
+                nn.Conv2d(hidden_channels, hidden_channels, 3, stride, 1,
+                          groups=hidden_channels, bias=False),
+                nn.BatchNorm2d(hidden_channels),
+                nn.ReLU6(inplace=True),
+                nn.Conv2d(hidden_channels, out_channels, 1, 1, 0, bias=False),
+                nn.BatchNorm2d(out_channels),
+            )
+        else:
+            self.conv = nn.Sequential(
+                nn.Conv2d(in_channels, hidden_channels, 1, 1, 0, bias=False),
+                nn.BatchNorm2d(hidden_channels),
+                nn.ReLU6(inplace=True),
+                nn.Conv2d(hidden_channels, hidden_channels, 3, stride, 1,
+                          groups=hidden_channels, bias=False),
+                nn.BatchNorm2d(hidden_channels),
+                nn.ReLU6(inplace=True),
+                nn.Conv2d(hidden_channels, out_channels, 1, 1, 0, bias=False),
+                nn.BatchNorm2d(out_channels),
+            )
+
+    def forward(self, x):
+        if self.use_res_connect:
+            return x + self.conv(x)
+        return self.conv(x)
+
+
+class MobileNetV2(nn.Module):
+    """MobileNetV2 implementation used by WatNet's feature extractor."""
+    def __init__(self, num_bands=4, num_classes=1000, width_mult=1.0):
+        super().__init__()
+        input_channel = 32
+        last_channel = 1280
+        self.last_channel = (make_divisible(last_channel * width_mult)
+                             if width_mult > 1.0 else last_channel)
+        inverted_residual_setting = [
+            (1, 16, 1, 1),
+            (6, 24, 2, 2),
+            (6, 32, 3, 2),
+            (6, 64, 4, 2),
+            (6, 96, 3, 1),
+            (6, 160, 3, 2),
+            (6, 320, 1, 1),
+        ]
+
+        self.head = conv3x3_bn_relu6(num_bands, input_channel, 2)
+        self.body = nn.Sequential()
+        for index, (expand_ratio, channels, repeats, stride) in enumerate(
+                inverted_residual_setting):
+            output_channel = (make_divisible(channels * width_mult)
+                              if expand_ratio > 1 else channels)
+            blocks = []
+            for repeat in range(repeats):
+                block_stride = stride if repeat == 0 else 1
+                blocks.append(InvertedResidual(
+                    input_channel, output_channel, block_stride, expand_ratio))
+                input_channel = output_channel
+            self.body.add_module('inverted_{}'.format(index), nn.Sequential(*blocks))
+
+        self.tail = conv1x1_bn_relu6(input_channel, self.last_channel)
+        self.classifier = nn.Linear(self.last_channel, num_classes)
+
+    def forward(self, x):
+        x = self.head(x)
+        x = self.body(x)
+        x = self.tail(x)
+        x = x.mean(3).mean(2)
+        return self.classifier(x)
+
+
+def aspp_conv(in_channels, out_channels, dilation):
+    return nn.Sequential(
+        nn.Conv2d(in_channels, out_channels, 3, padding=dilation,
+                  dilation=dilation, bias=False),
+        nn.BatchNorm2d(out_channels),
+        nn.ReLU(inplace=True)
+    )
+
+
+class aspp_pooling(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(in_channels, out_channels, 1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU()
+        )
+
+    def forward(self, x):
+        size = x.shape[-2:]
+        x = self.layers(x)
+        return F.interpolate(x, size=size, mode='bilinear', align_corners=False)
+
+
+class aspp(nn.Module):
+    def __init__(self, in_channels, atrous_rates):
+        super().__init__()
+        self.out_channels = 256
+        rate1, rate2, rate3 = tuple(atrous_rates)
+        self.convs = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(in_channels, self.out_channels, 1, bias=False),
+                nn.BatchNorm2d(self.out_channels),
+                nn.ReLU()
+            ),
+            aspp_conv(in_channels, self.out_channels, rate1),
+            aspp_conv(in_channels, self.out_channels, rate2),
+            aspp_conv(in_channels, self.out_channels, rate3),
+            aspp_pooling(in_channels, self.out_channels),
+        ])
+        self.project = nn.Sequential(
+            nn.Conv2d(5 * self.out_channels, self.out_channels, 1, bias=False),
+            nn.BatchNorm2d(self.out_channels),
+            nn.ReLU(),
+            nn.Dropout(0.5)
+        )
+
+    def forward(self, x):
+        return self.project(torch.cat([conv(x) for conv in self.convs], dim=1))
 
 def conv1x1_bn_relu(in_channels, out_channels):
     return nn.Sequential(
@@ -38,7 +183,7 @@ class mobilenet_feat(nn.Module):
     def __init__(self, in_channels):
         super().__init__()
         self.in_channels = in_channels
-        self.backbone = mobilenet.MobileNetV2(num_bands=self.in_channels, num_classes=2)
+        self.backbone = MobileNetV2(num_bands=self.in_channels, num_classes=2)
 
     def forward(self, input):
         x = self.backbone.head(input)
@@ -84,11 +229,13 @@ class watnet(nn.Module):
         if num_classes == 2:
             self.outp_layer = nn.Sequential(
                     nn.Conv2d(in_channels=128, out_channels=1, kernel_size=1),
-                    nn.Sigmoid())
+                    nn.Sigmoid()
+                    )
         else: 
             self.outp_layer = nn.Sequential(
                     nn.Conv2d(in_channels=128, out_channels=num_classes, kernel_size=1),
-                    nn.Softmax(dim=1))
+                    nn.Softmax()
+                    )
         # Initialize model parameters.
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -111,6 +258,12 @@ class watnet(nn.Module):
         x_high_mid_low = torch.cat([x_high_mid, x_low], dim=1)
         x_high_mid_low = self.high_mid_low_layer(x_high_mid_low)
         ### output layer
-        out_prob = self.outp_layer(x_high_mid_low)
-        return out_prob
+        out_logit = self.outp_layer(x_high_mid_low)
+        return out_logit
+
+if __name__ == '__main__':
+    model = watnet(num_bands=6, num_classes=2)
+    input_tensor = torch.randn(2, 6, 512, 512)   # Example input tensor with shape (batch_size, num_bands, height, width)
+    output = model(input_tensor)
+    print(output.shape)  # Output shape
 

@@ -7,6 +7,7 @@ des: functions for data processing
 
 import rasterio as rio 
 import numpy as np
+
 def read_scenes(scene_paths, truth_paths):
   paths_zip = zip(scene_paths, truth_paths)
   scenes_arr = []
@@ -20,3 +21,4 @@ def read_scenes(scene_paths, truth_paths):
       scenes_arr.append(scene_arr)
       truths_arr.append(truth_arr)
   return scenes_arr, truths_arr
+
