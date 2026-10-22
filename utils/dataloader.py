@@ -5,9 +5,9 @@ des: dataset and dataloader for deep learning tasks in remote sensing
 '''
 import random
 import torch
-import rasterio as rio
 import numpy as np
-
+import rasterio as rio
+from torchvision import tv_tensors
 
 ## create related functions
 ## - crop scene to patches
@@ -53,7 +53,6 @@ class ScenePathSet(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.paths_scene)
 
-
 class SceneArraySet(torch.utils.data.Dataset):
     '''
     des: scene and truth image reading from the np.array(): read data from memory.
@@ -64,15 +63,17 @@ class SceneArraySet(torch.utils.data.Dataset):
         self.transforms = transforms
     def __getitem__(self, index):
         '''load images and truths'''
-        scene_truth = self.scene_truth_list[index]
+        scene_truth = torch.as_tensor(self.scene_truth_list[index]).permute(2, 0, 1)
+        image = tv_tensors.Image(scene_truth[:-1])
+        mask = tv_tensors.Mask(scene_truth[-1:])
         '''pre-processing (e.g., random crop)'''
         ### Image augmentation
         if self.transforms is not None:
-            scene_truth = self.transforms(scene_truth)
-        patches, ptruth = scene_truth[0:-1], scene_truth[-1:]
-        return patches, ptruth
+            image, mask = self.transforms(image, mask)
+        return image, mask
     def __len__(self):
         return len(self.scene_truth_list) 
+
 
     
 ### - Dataset definition

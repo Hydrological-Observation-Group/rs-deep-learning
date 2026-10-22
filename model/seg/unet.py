@@ -110,11 +110,11 @@ class unet(nn.Module):
         if num_classes == 2:
             self.outp_layer = nn.Sequential(
                         nn.Conv2d(in_channels=32, out_channels=1, kernel_size=1),
-                        nn.Sigmoid())
+                        )
         else:
             self.outp_layer = nn.Sequential(
                         nn.Conv2d(in_channels=32, out_channels=num_classes, kernel_size=1),
-                        nn.Softmax(dim=1))
+                        )
 
     def forward(self, input):
         x_encode = input
@@ -131,6 +131,6 @@ class unet(nn.Module):
             x_decode = decode(x_decode)
             x_decode = torch.cat([x_decode, skip], dim=1)
         output = self.up_last(x_decode)
-        out_prob = self.outp_layer(output)
-        return out_prob
+        out_logit = self.outp_layer(output)
+        return out_logit
 

@@ -229,12 +229,12 @@ class watnet(nn.Module):
         if num_classes == 2:
             self.outp_layer = nn.Sequential(
                     nn.Conv2d(in_channels=128, out_channels=1, kernel_size=1),
-                    nn.Sigmoid()
+                    
                     )
         else: 
             self.outp_layer = nn.Sequential(
                     nn.Conv2d(in_channels=128, out_channels=num_classes, kernel_size=1),
-                    nn.Softmax()
+                    
                     )
         # Initialize model parameters.
         for m in self.modules():
